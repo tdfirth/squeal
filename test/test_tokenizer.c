@@ -45,6 +45,8 @@ MunitResult test_cmd_dbinfo(const MunitParameter params[], void* data) {
 }
 
 MunitResult test_sqlite_schema(const MunitParameter params[], void* data) {
+  (void)params;
+  (void)data;
   char* stmt =
       "CREATE TABLE sqlite_schema( \
          type text, \
@@ -67,6 +69,8 @@ MunitResult test_sqlite_schema(const MunitParameter params[], void* data) {
 
 MunitResult test_case_insensitive_keywords(const MunitParameter params[],
                                            void* data) {
+  (void)params;
+  (void)data;
   char* stmt = "SeLeCt FROM table CREAte";
   Token tokens[] = {
       {.tag = TOK_KW_SELECT}, {.tag = TOK_KW_FROM}, {.tag = TOK_KW_TABLE},
