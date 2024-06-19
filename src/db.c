@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "varint.h"
+
 struct MappedRegion {
   int size;
   int page_offset;
@@ -117,41 +119,63 @@ CellIter cell_iter(Page *p) {
   };
 }
 
-Cell cell_next(CellIter *ci) {
-  uint16_t next_offset = read_i16(ci->page->cell_ptrs + ci->pos);
-  ci->pos++;
+Cell cell_next(CellIter *iter) {
+  uint16_t offset = read_i16(iter->page->cell_ptrs + iter->pos);
+  iter->pos++;
+  uint8_t *cell = iter->page->cells + offset;
   Cell result;
-  result.type = ci->page->type;
+  result.type = iter->page->type;
   switch (result.type) {
-    case TABLE_LEAF:
+    case TABLE_LEAF: {
+      VarInt payload_len = sq_varint_decode(cell);
+      VarInt row_id = sq_varint_decode(cell + payload_len.bytes_read);
+      uint8_t payload_offset = payload_len.bytes_read + row_id.bytes_read;
+      uint32_t overflow_page =
+          read_i32(cell + payload_offset + payload_len.value);
+
       result.as.table_leaf = (TableLeafCell){
-          .payload_len = 0,
-          .row_id = 0,
-          .overflow_page = 0,
-          .payload = 0,
+          .payload_len = payload_len.value,
+          .row_id = row_id.value,
+          .overflow_page = overflow_page,
+          .payload = cell + payload_offset,
       };
       break;
-    case TABLE_INTERIOR:
+    }
+    case TABLE_INTERIOR: {
+      uint32_t left_child = read_i32(cell);
+      VarInt row_id = sq_varint_decode(cell + 4);
       result.as.table_interior = (TableInteriorCell){
-          .left_child = 0,
-          .row_id = 0,
+          .left_child = left_child,
+          .row_id = row_id.value,
       };
       break;
-    case INDEX_LEAF:
+    }
+    case INDEX_LEAF: {
+      VarInt payload_len = sq_varint_decode(cell);
+      uint8_t payload_offset = payload_len.bytes_read;
+      uint32_t overflow_page =
+          read_i32(cell + payload_offset + payload_len.value);
       result.as.index_leaf = (IndexLeafCell){
-          .payload_len = 0,
-          .overflow_page = 0,
-          .payload = 0,
+          .payload_len = payload_len.value,
+          .overflow_page = overflow_page,
+          .payload = cell + payload_offset,
       };
       break;
-    case INDEX_INTERIOR:
+    }
+    case INDEX_INTERIOR: {
+      uint32_t left_child = read_i32(cell);
+      VarInt payload_len = sq_varint_decode(cell + 4);
+      uint8_t payload_offset = 4 + payload_len.bytes_read;
+      uint32_t overflow_page =
+          read_i32(cell + payload_offset + payload_len.value);
       result.as.index_interior = (IndexInteriorCell){
-          .left_child = 0,
-          .overflow_page = 0,
-          .payload_len = 0,
-          .payload = 0,
+          .left_child = left_child,
+          .overflow_page = overflow_page,
+          .payload_len = payload_len.value,
+          .payload = cell + payload_offset,
       };
       break;
+    }
   }
   return result;
 };
