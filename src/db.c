@@ -110,13 +110,6 @@ struct CellIter {
   int pos;
 };
 
-/*
- * Connundrum...
- * The logic to iterate through cells is the same for all cell types. This
- * encourages the cell_iter pattern. However, depending on the page type, the
- * cells look different.
- */
-
 CellIter cell_iter(Page *p) {
   return (CellIter){
       .page = p,
@@ -127,11 +120,40 @@ CellIter cell_iter(Page *p) {
 Cell cell_next(CellIter *ci) {
   uint16_t next_offset = read_i16(ci->page->cell_ptrs + ci->pos);
   ci->pos++;
-  return (Cell){
-      .n_bytes = 0,
-      .row_id = 0,
-      .overflow_page = 0,
-  };
+  Cell result;
+  result.type = ci->page->type;
+  switch (result.type) {
+    case TABLE_LEAF:
+      result.as.table_leaf = (TableLeafCell){
+          .payload_len = 0,
+          .row_id = 0,
+          .overflow_page = 0,
+          .payload = 0,
+      };
+      break;
+    case TABLE_INTERIOR:
+      result.as.table_interior = (TableInteriorCell){
+          .left_child = 0,
+          .row_id = 0,
+      };
+      break;
+    case INDEX_LEAF:
+      result.as.index_leaf = (IndexLeafCell){
+          .payload_len = 0,
+          .overflow_page = 0,
+          .payload = 0,
+      };
+      break;
+    case INDEX_INTERIOR:
+      result.as.index_interior = (IndexInteriorCell){
+          .left_child = 0,
+          .overflow_page = 0,
+          .payload_len = 0,
+          .payload = 0,
+      };
+      break;
+  }
+  return result;
 };
 
 bool cell_done(CellIter *ci) { return ci->page->num_cells == ci->pos; };

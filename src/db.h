@@ -69,15 +69,43 @@ typedef struct Page {
 
 Page db_get_page(Db* db, int offset);
 
-typedef struct Cell {
-  uint64_t n_bytes;
+typedef struct TableLeafCell {
+  uint64_t payload_len;
   uint64_t row_id;
-  uint8_t* payload;
   uint32_t overflow_page;
-} Cell;
 
-// typedef struct TableLeafCell {
-// } TableLeafCell;
+  uint8_t* payload;
+} TableLeafCell;
+
+typedef struct TableInteriorCell {
+  uint32_t left_child;
+  uint64_t row_id;
+} TableInteriorCell;
+
+typedef struct IndexLeafCell {
+  uint64_t payload_len;
+  uint32_t overflow_page;
+
+  uint8_t* payload;
+} IndexLeafCell;
+
+typedef struct IndexInteriorCell {
+  uint32_t left_child;
+  uint32_t overflow_page;
+  uint64_t payload_len;
+
+  uint8_t* payload;
+} IndexInteriorCell;
+
+typedef struct Cell {
+  PageType type;
+  union {
+    TableLeafCell table_leaf;
+    TableInteriorCell table_interior;
+    IndexLeafCell index_leaf;
+    IndexInteriorCell index_interior;
+  } as;
+} Cell;
 
 typedef struct CellIter CellIter;
 
