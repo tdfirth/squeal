@@ -3,11 +3,6 @@
 
 #include <stdint.h>
 
-typedef struct VarInt {
-  uint64_t value;      // The value of the VarInt
-  uint8_t bytes_read;  // The number of bytes read to build the VarInt
-} VarInt;
-
-VarInt sq_varint_decode(const uint8_t *buf);
+int varint_decode(const uint8_t* buf, uint64_t* result);
 
 #endif  // VARINT_H
