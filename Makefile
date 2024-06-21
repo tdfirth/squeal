@@ -26,24 +26,26 @@ MUNIT_OBJ = $(MUNIT_C:$(LIB)/%.c=$(OBJ)/%.o)
 NAME = squeal
 TEST_NAME = test-$(NAME)
 
+# main
 TARGET = $(BIN)/$(NAME)
-TEST_TARGET = $(BIN)/$(TEST_NAME)
-
-all: $(NAME) $(TEST_NAME)
-
-run: $(NAME)
-	./$(TARGET)
-
-args ?= 
-test: $(TEST_NAME)
-	./$(TEST_TARGET) $(args)
 
 $(NAME): dirs $(TARGET)
 
-$(TEST_NAME): dirs $(TEST_TARGET)
+args ?= 
+
+run: $(NAME)
+	./$(TARGET) $(args)
 
 $(TARGET): $(SRC_OBJ) $(MAIN_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
+
+# test
+TEST_TARGET = $(BIN)/$(TEST_NAME)
+
+test: $(TEST_NAME)
+	./$(TEST_TARGET) $(args)
+
+$(TEST_NAME): dirs $(TEST_TARGET)
 
 # Test target links and include munit.
 $(MUNIT_OBJ): LDFLAGS += -Llib/munit
