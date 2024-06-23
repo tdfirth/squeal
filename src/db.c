@@ -1,8 +1,10 @@
 #include "db.h"
 
+#include <assert.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -21,7 +23,7 @@ struct MappedRegion map_file(const char *filename) {
   struct stat sb;
   fstat(fd, &sb);
   int size = sb.st_size > MMAP_SIZE ? MMAP_SIZE : sb.st_size;
-  uint8_t *mapped = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+  uint8_t *mapped = mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
   close(fd);
   return (struct MappedRegion){
       .size = size,
@@ -47,8 +49,23 @@ uint8_t read_i8(const uint8_t *buf) { return buf[0]; }
 
 uint16_t read_i16(const uint8_t *buf) { return (buf[0] << 8) | buf[1]; }
 
+uint32_t read_i24(const uint8_t *buf) {
+  return (buf[0] << 16) | (buf[1] << 8) | buf[2];
+}
+
 uint32_t read_i32(const uint8_t *buf) {
   return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+}
+
+uint64_t read_i48(const uint8_t *buf) {
+  return ((uint64_t)buf[0] << 32) | (buf[1] << 24) | (buf[2] << 16) |
+         (buf[3] << 8) | buf[4];
+}
+
+uint64_t read_i64(const uint8_t *buf) {
+  return ((uint64_t)buf[0] << 56) | ((uint64_t)buf[1] << 48) |
+         ((uint64_t)buf[2] << 40) | ((uint64_t)buf[3] << 32) | (buf[4] << 24) |
+         (buf[5] << 16) | (buf[6] << 8) | buf[7];
 }
 
 Page db_get_page(Db *db, int offset) {
@@ -68,7 +85,7 @@ Page db_get_page(Db *db, int offset) {
   bool is_interior = page.type == TABLE_INTERIOR || page.type == INDEX_INTERIOR;
 
   page.cell_ptrs = page_header_start + (is_interior ? 12 : 8);
-  page.cells = page_header_start + page.cell_content_area;
+  page.cells = page_start + page.cell_content_area;
 
   if (is_interior) {
     page.right_most_pointer = read_i32(page_header_start + 8);
@@ -107,11 +124,6 @@ DbHeader db_header(Db *db) {
   return header;
 }
 
-struct CellIter {
-  Page *page;
-  int pos;
-};
-
 CellIter cell_iter(Page *p) {
   return (CellIter){
       .page = p,
@@ -119,10 +131,11 @@ CellIter cell_iter(Page *p) {
   };
 }
 
-Cell cell_next(CellIter *iter) {
-  uint16_t offset = read_i16(iter->page->cell_ptrs + iter->pos);
+Cell iter_next(CellIter *iter) {
+  int cell_ptr_offset = iter->pos * 2;
+  uint16_t offset = read_i16(iter->page->cell_ptrs + cell_ptr_offset);
   iter->pos++;
-  uint8_t *cell = iter->page->cells + offset;
+  uint8_t *cell = iter->page->_page_start + offset;
   Cell result;
   result.type = iter->page->type;
   switch (result.type) {
@@ -182,55 +195,72 @@ Cell cell_next(CellIter *iter) {
   return result;
 }
 
-bool cell_done(CellIter *ci) { return ci->page->num_cells == ci->pos; }
+bool iter_done(CellIter *ci) { return ci->page->num_cells == ci->pos; }
 
-/* Ok, now that we've got a way to iterate over cells, we need a way to read
- * their payloads. We want something that encodes the schemak
+/* Reading a record in SQLite is kind of annoying. Because of dynamic typing,
+ * you can actually encounter a value of any kind in any column. This means you
+ * can't do any clever JIT-type stuff like precalculating offsets. If you want
+ * to access the 5th column, you just have to look through all of the headers
+ * and accumulate the offsets until you get to the one you want.
+ *
+ * Additionally, the caller doesn't know how big the result is going to be, so
+ * you actually have to allocate the memory (if required) for the value in here.
+ *
+ * For now, we're going to return a 'Value' struct that encodes the length of
+ * the data and a pointer to the contents. As a small optimization, if the
+ * length is 0 we'll interpret the pointer as an integer, and if it's 1 we'll
+ * interpret it is a float. Otherwise it's a pointer back to the memory mapped
+ * region.
  */
-void read_record(uint8_t *payload) {
+Value read_record(int col, uint8_t *payload) {
   uint64_t header_len;
   int bytes_read = varint_decode(payload, &header_len);
-  uint8_t *columns = payload + bytes_read;
+  uint8_t *column_headers = payload + bytes_read;
   uint8_t *body = payload + header_len;
 
-  int col_header_len;
-  do {
-    uint64_t serial_type;
-    col_header_len = varint_decode(columns, &serial_type);
-    columns += col_header_len;
+  // First we move along the header, accumulating offsets until we get to the
+  // value we want to read.
 
-    int len;
+  int current_column = 0;
+
+  int col_header_len;
+  uint64_t serial_type;
+  uint64_t value_len;
+  do {
+    col_header_len = varint_decode(column_headers, &serial_type);
+    column_headers += col_header_len;
+
     switch (serial_type) {
-      case 0: {
-        len = 0;
-      }
-      case 1: {
-        len = 1;
-      }
-      case 2: {
-        len = 2;
-      }
-      case 3: {
-        len = 3;
-      }
-      case 4: {
-        len = 4;
-      }
-      case 5: {
-        len = 6;
-      }
-      case 6: {
-        len = 8;
-      }
-      case 7: {
-        len = 8;
-      }
-      case 8: {
-        len = 0;
-      }
-      case 9: {
-        len = 0;
-      }
+      case 0:
+        value_len = 0;
+        break;
+      case 1:
+        value_len = 1;
+        break;
+      case 2:
+        value_len = 2;
+        break;
+      case 3:
+        value_len = 3;
+        break;
+      case 4:
+        value_len = 4;
+        break;
+      case 5:
+        value_len = 6;
+        break;
+      case 6:
+        value_len = 8;
+        break;
+      case 7:
+        value_len = 8;
+        break;
+      case 8:
+        value_len = 0;
+        break;
+      case 9:
+        value_len = 0;
+        break;
       case 10:
       case 11:
         // 10 and 11 are reserved
@@ -238,13 +268,105 @@ void read_record(uint8_t *payload) {
       default: {
         if (serial_type % 2 == 0) {
           // Blob
-          len = (serial_type - 12) / 2;
+          value_len = (serial_type - 12) / 2;
         } else {
           // Text
-          len = (serial_type - 13) / 2;
+          value_len = (serial_type - 13) / 2;
         }
       }
     }
 
-  } while (columns != body);
+    // If we're looking at the current column then break, because we don't want
+    // to move the body pointer.
+    if (current_column == col) {
+      break;
+    }
+
+    // Move along to the next header and shift the body pointer.
+    current_column++;
+    body += value_len;
+  } while (1);
+
+  Value result;
+
+  switch (serial_type) {
+    case 0: {
+      result.type = vNULL;
+      result.blob = NULL;
+      break;
+    }
+    case 1: {
+      result.type = vINT;
+      result.integer = read_i8(body);
+      break;
+    }
+    case 2: {
+      result.type = vINT;
+      result.integer = read_i16(body);
+      break;
+    }
+    case 3: {
+      result.type = vINT;
+      result.integer = read_i24(body);
+      break;
+    }
+    case 4: {
+      result.type = vINT;
+      result.integer = read_i32(body);
+      break;
+    }
+    case 5: {
+      result.type = vINT;
+      result.integer = read_i48(body);
+      break;
+    }
+    case 6: {
+      result.type = vINT;
+      result.integer = read_i64(body);
+      break;
+    }
+    case 7: {
+      result.type = vFLOAT;
+      result.floating_point = 0;
+      break;
+    }
+    case 8: {
+      result.type = vINT;
+      result.integer = 0;
+      break;
+    }
+    case 9: {
+      result.type = vINT;
+      result.integer = 1;
+      break;
+    }
+    case 10:
+    case 11:
+      assert(0 &&
+             "Unreachable, record serial types 10 and 11 are for internal use "
+             "only.");
+    default: {
+      // Add two because we've used 0, 1, and 2 for the tagged union.
+      result.type = value_len + 2;
+      result.blob = body;
+    }
+  }
+
+  return result;
+}
+
+void print_value(Value value) {
+  switch (value.type) {
+    case vNULL:
+      printf("NULL\n");
+      break;
+    case vINT:
+      printf("%lu\n", value.integer);
+      break;
+    case vFLOAT:
+      printf("%f\n", value.floating_point);
+      break;
+    default:
+      printf("%.*s\n", value.type - 2, value.blob);
+  }
 }

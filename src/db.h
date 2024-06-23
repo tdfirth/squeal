@@ -104,10 +104,29 @@ typedef struct Cell {
   } as;
 } Cell;
 
+struct CellIter {
+  Page* page;
+  int pos;
+};
 typedef struct CellIter CellIter;
 
 CellIter cell_iter(Page* p);
-Cell cell_next(CellIter* ci);
-bool cell_done(CellIter* ci);
+Cell iter_next(CellIter* ci);
+bool iter_done(CellIter* ci);
+
+typedef enum ValueType { vNULL = 0, vINT = 1, vFLOAT = 2, vBLOB = 3 } ValueType;
+
+typedef struct Value {
+  ValueType type;
+  union {
+    uint64_t integer;
+    double floating_point;
+    uint8_t* blob;
+  };
+} Value;
+
+Value read_record(int col, uint8_t* payload);
+
+void print_value(Value value);
 
 #endif  // DB_H
