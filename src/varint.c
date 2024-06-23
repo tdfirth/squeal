@@ -13,7 +13,7 @@ int varint_decode(const uint8_t* buf, uint64_t* result) {
     bytes_read++;
   } while ((byte & 0x80) && bytes_read < 8);
 
-  // If we didn't see the continuatoion bit then there's a ninth byte.
+  // If we saw the continuatoion bit then there's a ninth byte.
   if ((byte & 0x80)) {
     bytes_read++;
     value = (value << 8) | *buf;

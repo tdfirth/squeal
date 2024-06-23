@@ -183,3 +183,68 @@ Cell cell_next(CellIter *iter) {
 }
 
 bool cell_done(CellIter *ci) { return ci->page->num_cells == ci->pos; }
+
+/* Ok, now that we've got a way to iterate over cells, we need a way to read
+ * their payloads. We want something that encodes the schemak
+ */
+void read_record(uint8_t *payload) {
+  uint64_t header_len;
+  int bytes_read = varint_decode(payload, &header_len);
+  uint8_t *columns = payload + bytes_read;
+  uint8_t *body = payload + header_len;
+
+  int col_header_len;
+  do {
+    uint64_t serial_type;
+    col_header_len = varint_decode(columns, &serial_type);
+    columns += col_header_len;
+
+    int len;
+    switch (serial_type) {
+      case 0: {
+        len = 0;
+      }
+      case 1: {
+        len = 1;
+      }
+      case 2: {
+        len = 2;
+      }
+      case 3: {
+        len = 3;
+      }
+      case 4: {
+        len = 4;
+      }
+      case 5: {
+        len = 6;
+      }
+      case 6: {
+        len = 8;
+      }
+      case 7: {
+        len = 8;
+      }
+      case 8: {
+        len = 0;
+      }
+      case 9: {
+        len = 0;
+      }
+      case 10:
+      case 11:
+        // 10 and 11 are reserved
+        continue;
+      default: {
+        if (serial_type % 2 == 0) {
+          // Blob
+          len = (serial_type - 12) / 2;
+        } else {
+          // Text
+          len = (serial_type - 13) / 2;
+        }
+      }
+    }
+
+  } while (columns != body);
+}

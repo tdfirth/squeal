@@ -70,31 +70,28 @@ typedef struct Page {
 Page db_get_page(Db* db, int offset);
 
 typedef struct TableLeafCell {
-  uint64_t payload_len;
   uint64_t row_id;
-  uint32_t overflow_page;
-
+  uint64_t payload_len;
   uint8_t* payload;
+  uint32_t overflow_page;
 } TableLeafCell;
 
 typedef struct TableInteriorCell {
-  uint32_t left_child;
   uint64_t row_id;
+  uint32_t left_child;
 } TableInteriorCell;
 
 typedef struct IndexLeafCell {
   uint64_t payload_len;
-  uint32_t overflow_page;
-
   uint8_t* payload;
+  uint32_t overflow_page;
 } IndexLeafCell;
 
 typedef struct IndexInteriorCell {
+  uint64_t payload_len;
+  uint8_t* payload;
   uint32_t left_child;
   uint32_t overflow_page;
-  uint64_t payload_len;
-
-  uint8_t* payload;
 } IndexInteriorCell;
 
 typedef struct Cell {
